@@ -1,0 +1,468 @@
+---
+title: "Simple features in R - geometries"
+author: "Walter Humberto Subiza Pina"
+date: "12/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Geometry of spatial objects in R
+
+The document refers exclusively to vector geometries, **sfg** objects from the _sf_ library which are the fundamental block of the category of spatial or georeferenced objects in _R_.
+
+The representation of objects on the Earth's surface is done through vector objects of the type point, line or polygon and their multi variants. Also included is a new category, **geometrycollection**, not supported by the ESRI format of layer-type files (shp).
+
+This new format has become increasingly common, since its inclusion in databases like _Postgre/Postgis_ or data formats like _geoJSON_.
+
+In the first part, we will see the creation of geometries, including **geometrycollection**. This is not the usual form of getting vector geometries, but it is necessary to understand the basis in order to prevent or solve errors in our projects.
+
+In the second part, how to create **geometrycollection** objects from ESRI files and besides, how perform a extraction of their different components. This can be useful in case you need to create a single object containing several geometries to share data or store it in a database.
+
+Finally in the third part, we save the **geometrycollection** in a **Postgre/Postgis** database and read back or import an object from the database into the _R_ environment.
+
+---
+
+### 1. **sfg**  objects
+
+```{r}
+library(sf)
+```
+
+---
+
+ When creating vector objects, the geometry coordinates input in _R_ must be:
+ 
+---
+
+| geometry| input| function|
+|:------------|:------------|:------------|
+|simple point| numerical vector|st_point()|
+| multipoints/line|matrix| st_multipoint(), st_linestring()|
+|multilines/(multi)polygons/geometry collection | lists| st_polygon()/ st_multilinestring()/ st_geometrycollection()|
+        
+        
+#### Creating a simple point object
+
+Input the object's coordinates with a numeric vector. The point can be two-dimensional, three-dimensional (including altitude, for example) or even including an attribute (type M, see <https://r-spatial.github.io/sf/articles/sf1.html>).
+
+---
+
+```{r}
+p <- st_point(c(1, 3, 4)) # tri-dimensional point
+
+plot(p, 
+     axes = T, 
+     lwd  = 5, 
+     col  = "red")
+```
+
+
+#### Creation of multi-point objects
+
+The input must be a matrix, in this case given by the _rbind()_ function. 
+
+---
+
+```{r}
+mp <- st_multipoint(rbind(c(4, 1), 
+                          c(1, 3), 
+                          c(3, 5), 
+                          c(6, 6)))
+
+mp2 <- st_multipoint(rbind(c(4, 3), 
+                           c(2, 4), 
+                           c(5, 2), 
+                           c(4, 2)))
+
+plot(mp, 
+     axes  = T, 
+     lwd   = 5, 
+     col   = "red",
+     reset = F)
+
+plot(mp2, 
+     axes = T, 
+     lwd  = 5, 
+     col  = "blue",
+     add  = T)
+
+``` 
+
+---
+
+
+#### Line object creation
+
+The geometry input must be a matrix.
+
+```{r}
+l <- st_linestring(rbind(c(1, 5), 
+                         c(4, 4),
+                         c(4, 1),
+                         c(0, 3)))
+
+plot(l, 
+     axes = T, 
+     lwd  = 3, 
+     col  = "red")
+```
+
+---
+
+
+#### Multiline object creation
+
+The geometry is entered through a list containing the different segments of the line.
+
+```{r}
+ml <- st_multilinestring((list(rbind(c(1, 5), 
+                                     c(4, 4), 
+                                     c(4, 1), 
+                                     c(2, 2), 
+                                     c(3, 3)), 
+                               rbind(c(1, 2), 
+                                     c(2, 4)))))
+
+ml2 <- st_multilinestring((list(rbind(c(2, 4), 
+                                      c(3, 4), 
+                                      c(4, 2), 
+                                      c(3, 2), 
+                                      c(2, 1)), 
+                                rbind(c(2, 2), 
+                                      c(3, 1)))))
+
+plot(ml,
+     col   = "red", 
+     axes  = T, 
+     lwd   = 3,
+     reset = F)
+plot(ml2, 
+     col = "blue", 
+     add = T,
+     lwd = 3)
+```
+
+---
+
+#### Polygon creation
+
+Similar to multiline, it uses a list but with the difference that the start and end points are identical, to indicate the polygon closure.
+
+---
+
+```{r}
+pol <- st_polygon(list(rbind(c(0, 1), 
+                             c(0, 4), 
+                             c(4, 6), 
+                             c(6, 1), 
+                             c(0, 1))))
+
+plot(pol, 
+     lwd   = 3,
+     axes  = T)
+```
+
+---
+
+#### **geometrycollection**
+
+**geometrycollection** is a combination of the different objects already presented.
+
+```{r}
+geomcol <- c(st_geometrycollection(list(mp, 
+                                        mp2, 
+                                        ml, 
+                                        ml2, 
+                                        pol)))
+st_geometry_type(geomcol) # what kind of object is?
+```
+
+---
+
+Visualization, access is made through square brackets, the access order is the same as the creation of the collection.
+
+---
+
+```{r}
+plot(geomcol[[1]], 
+                 axes  = T, 
+                 col   = "red", 
+                 lwd   = 3,
+                 reset = F)           
+plot(geomcol[[2]], col = "blue",  add = T, lwd = 5)
+plot(geomcol[[3]], col = "red",   add = T, lwd = 3)
+plot(geomcol[[4]], col = "blue",  add = T, lwd = 3)
+plot(geomcol[[5]],                add = T, lwd = 2)
+```
+
+---
+
+### 2. creating a **geometrycollection ** object from ESRI-like layer file (shp)
+
+---
+
+We are going to build a **geometrycollection** from two layer files, a multi-polygon from the states of Brazil and the other layer a multi-point one, with the capitals of each of the 27 states. The two files were downloaded in 2019 from the IBGE portal <https://www.ibge.gov.br/geociencias/organizacao-do-territorio/estrutura-territorial.html>.
+
+The files can be also downloaded from the dropbox site, using the link <https://www.dropbox.com/sh/ogz8vy5wgtp9n9w/AAAuE3b_0Hf3b2is7OyTFQpIa?dl=1> in the form of a zip file. The files must be decompress, copy to your local directory and update the link to them in the following chunks.
+
+#### First file, locally stored 
+
+---
+
+```{r}
+# update the link to your needs 
+path <- 'C:/Users/Walter Pina/Documents/bases/br_uf_2019.shp'
+brasil <- read_sf(path) # Brazilian states, IBGE 2019
+```
+
+---
+
+#### Simplifying the outline of Brazil and states
+
+When the full precision of one object is not necessary, we can simplify it in order to facilitate its storage, manipulation or visualization. We check its size before and after simplification, the process may take several attempts to arrive at an appropriate view and size.
+
+---
+
+```{r}
+cat("Size of the initial Brazil object = ", object.size(brasil), "bytes")
+
+plot(brasil["nm_uf"], axes = T, main = "Full Brazil")
+```
+
+---
+
+The simplification factor must be compatible with the _CRS_ of the file, in this case we have geographic coordinates, so _dTolerance = 0.1_ corresponds to a tenth of a degree or approximately 11 km.
+
+
+```{r warning=FALSE}
+brasil_simples <- st_simplify(brasil, 
+                              dTolerance       = 0.1,
+                              preserveTopology = T)
+```
+
+---
+
+```{r}
+cat("Final size = ", object.size(brasil_simples), "bytes")
+
+plot(brasil_simples["nm_uf"], axes = T, main = "Simplified Brazil")
+```
+
+---
+
+_CRS_ verification
+
+```{r}
+st_crs(brasil_simples)
+```
+
+---
+
+Extraction of multi-polygon geometry, for later combination in a **geometrycollection **.
+
+---
+
+```{r}
+br_geom <- st_geometry(brasil_simples, value = NULL) # value = NULL exclude attributes
+```
+
+---
+
+#### Second file
+
+---
+
+```{r}
+# State capitals for Brazil
+path2 <- 'C:/Users/Walter Pina/Documents/bases/Cadastro de localidades/capitais.shp'
+capitais <- read_sf(path2) 
+```
+
+---
+
+_CRS_ verification
+
+---
+
+```{r}
+st_crs(capitais) # verifica CRS
+capitais <- st_transform(capitais, 4674) # transformação para SIRGAS 2000
+st_crs(capitais) # verificação
+```
+
+---
+
+A CRS transformation was performed because the file is native defined in WGS84, different from the previous one.
+
+---
+
+Extraction of multi-point geometry for later combination in a **geometrycollection **
+
+---
+
+```{r}
+cap_geom <- st_geometry(capitais, value = NULL)
+```
+
+---
+
+
+**It should be noted that for the right creation of the geometrycollection, the CRS of all objects included must be the same.**
+
+
+---
+
+#### Creation of a **geometrycollection** object 
+
+Using the geometries in _cap_geom_ and _br_geom_, we create the **geometrycollection** object.
+
+--
+
+```{r}
+br_geom_coll <- c(st_geometrycollection(cap_geom),
+                  st_geometrycollection(br_geom))
+
+st_geometry_type(br_geom_coll) # verifiyng the type 
+class(br_geom_coll)
+```
+
+---
+
+#### Data extraction
+
+If we have an object of type **geometrycollection** in our global environment, the extraction of geometries can be done in a very simple way with the function _st_collection_extract()_, with the argument _type_ indicating whether if a "POINT", "LINE" or "POLYGON". See <https://r-spatial.github.io/sf/reference/st_collection_extract.html>
+
+---
+
+Extraction and visualization of capitals.
+
+```{r}
+br_cap <- st_collection_extract(
+                                br_geom_coll,
+                                type = c("POINT"),
+                                warn = FALSE)
+
+plot(br_cap, axes = T, lwd =5)
+
+```
+
+---
+
+Extraction and visualization of states.
+
+```{r}
+br_uf  <- st_collection_extract(
+                                br_geom_coll,
+                                type = c("POLYGON"),
+                                warn = FALSE)
+plot(br_uf, axes = T, lwd =3)
+```
+
+---
+
+#### The whole graphic
+
+```{r}
+plot(br_uf, 
+     reset = F, 
+     lwd   = 3, 
+     axes  = T)
+
+plot(br_cap, 
+     add = T, 
+     col = "red", 
+     lwd = 5)
+```
+
+---
+
+### 3. **geometrycollection** saving in Postgre / Postgis database
+
+In order to load the **geometrycollection** in the database, the object class **sfg** have to be converted, first into **sfc** class and then into **sf**.
+
+
+
+```{r}
+br_geom <- st_sfc(br_geom_coll, crs = 4674) # geometry_collection to sfc, adding CRS
+
+br_geo <- st_sf(br_geom)                    # sfc to sf
+```
+
+---
+
+Having the **sf** _br_geo_ object, we need to establish a connection with the database (using _RPostgres_ library). In the following chunk there are local arguments to my Postgres database for loading the object.
+
+---
+
+```{r message=FALSE}
+library(RPostgres)
+con <- dbConnect(Postgres(), 
+                            user     = 'postgres',
+                            password = 'postgres', 
+                            dbname   = 'r_databases', 
+                            port     = 5433)
+
+# 
+dbWriteTable(con, "br_geo", br_geo, overwrite = T )
+dbDisconnect(con)
+```
+
+---
+
+#### Reading from the Postgres database with _RPostgres_ library.
+
+In the following chunk it can be included SQL commands to capture all or part of the desired table. Now we have a **geometrycollection sf** object stored in a Postgres database and we are going to read the _br_geo_ file back. 
+
+---
+
+```{r}
+try(conn <- dbConnect(Postgres(), 
+                               user     = 'postgres',
+                               password = 'postgres', 
+                               dbname   = 'r_databases', 
+                               port     = 5433))
+
+if (exists("conn") && !inherits(conn, "try-error")) {
+  br_geom_db = st_read(conn, 
+                       query = "select * from br_geo;")
+  print(st_crs(br_geom_db)) # CRS will be given by the database file CRS!
+  dbDisconnect(conn)
+ }
+```
+
+---
+
+Checking the geometry of the object.
+
+```{r}
+st_geometry_type(br_geom_db)
+```
+
+---
+
+Finally, to verify the integrity of the object read, we will repeat the reading of the contour of Brazil and its 27 states.
+
+```{r}
+br_uf  <- st_collection_extract(
+                                br_geom_db,
+                                type = c("POLYGON"),
+                                warn = FALSE)
+plot(br_uf, axes = T, lwd =3)
+```
+
+----
+
+REFERENCES
+
+CREDITOS: 
+
+  +  Pebesma, E., 2018. Simple Features for R: Standardized Support
+  for Spatial Vector Data. The R Journal,
+  https://journal.r-project.org/archive/2018/RJ-2018-009/
+
+### End of tutorial
+
