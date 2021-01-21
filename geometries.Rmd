@@ -456,6 +456,8 @@ plot(br_uf, axes = T, lwd =3)
 
 ----
 
+On the next document we will see how to prepare and add some attributes to the **geometrycollection** object.
+
 REFERENCES
 
 CREDITOS: 
